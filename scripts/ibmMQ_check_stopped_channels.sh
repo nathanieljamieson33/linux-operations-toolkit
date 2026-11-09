@@ -1,5 +1,4 @@
 #!/bin/sh
-# Author: Nathaniel Jamieson
 # Report STOPPED channels on locally running IBM MQ queue managers.
 
 export LC_ALL=C

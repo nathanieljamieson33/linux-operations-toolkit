@@ -1,0 +1,97 @@
+#!/usr/bin/expect -f
+# Desc: SiteScope SFTP password login check.
+# Exit codes: 
+#   0 = success
+#   1 = connection/login failure,
+#   2 = timeout
+#   3 = invalid input or local setup error.
+
+# Check for appopriate number of args passed
+if {$argc != 4} {
+    puts stderr "Usage: $argv0 HOST PORT USER PASSWORD_FILE"
+    exit 3
+}
+lassign $argv host port user password_file
+
+# verify valid port number provided
+if {![regexp {^[0-9]{1,5}$} $port] ||
+    [scan $port %d port_number] != 1 ||
+    $port_number < 1 || $port_number > 65535} {
+    puts stderr "ERROR: PORT must be an integer from 1 to 65535."
+    exit 3
+}
+
+# Verify username starts with a letter, digit, or underscore
+if {![regexp {^[[:alnum:]_][[:alnum:]_.-]*$} $user]} {
+    puts stderr "ERROR: Invalid SFTP username."
+    exit 3
+}
+
+# Verify hostname format, reject args passing port number as part of hostname
+if {![regexp {^[A-Za-z0-9][A-Za-z0-9.-]*$} $host]} {
+    puts stderr "ERROR: HOST must be a hostname or IPv4 address."
+    exit 3
+}
+
+if {[catch {open [file normalize $password_file] r} secret]} {
+    puts stderr "ERROR: Cannot open the password file."
+    exit 3
+}
+set read_failed [catch {read $secret} password]
+close $secret
+if {$read_failed} {
+    puts stderr "ERROR: Cannot read the password file."
+    exit 3
+}
+# Remove one file-ending newline. Preserve spaces in the password.
+regsub {\r?\n$} $password {} password
+if {$password eq "" || [regexp {[[:cntrl:]]} $password]} {
+    puts stderr "ERROR: The password file must contain one nonempty line without control characters."
+    exit 3
+}
+
+set env(LC_ALL) C
+set env(TERM) dumb
+set timeout 20
+log_user 0
+
+if {[catch {
+    spawn -noecho sftp -P $port_number -oConnectTimeout=20 -oStrictHostKeyChecking=yes \
+        -oBatchMode=no -oControlPath=none -oPreferredAuthentications=password \
+        -oPasswordAuthentication=yes -oNumberOfPasswordPrompts=1 -oLogLevel=ERROR \
+        -- "$user@$host"
+}]} {
+    puts stderr "ERROR: Could not start the SFTP client."
+    exit 3
+}
+
+set password_sent 0
+expect {
+    -re {(?n)^[^\r\n]+'s password:[ \t]*$} {
+        if {$password_sent || [catch {send -- "$password\r"}]} {
+            puts "FATAL: Could not complete SFTP password authentication."
+            exit 1
+        }
+        set password_sent 1
+        exp_continue -continue_timer
+    }
+    -re {(?n)^sftp>[ \t]*$} {
+        if {!$password_sent} {
+            puts "FATAL: SFTP opened without validating the supplied password."
+            exit 1
+        }
+        catch {send -- "quit\r"}
+        puts "OK: SFTP connection and password login successful."
+        exit 0
+    }
+    eof {
+        puts "FATAL: SFTP exited before login completed."
+        exit 1
+    }
+    timeout {
+        puts "ERROR: Timed out waiting for SFTP login."
+        exit 2
+    }
+}
+
+exit 1

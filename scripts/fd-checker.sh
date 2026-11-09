@@ -1,6 +1,5 @@
 #!/bin/bash
 #
-# Author: Nathaniel Jamieson
 # Purpose: Check and correct FD limits for processes matching
 #          a specified process name.
 #

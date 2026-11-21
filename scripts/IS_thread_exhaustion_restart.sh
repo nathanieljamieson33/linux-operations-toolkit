@@ -100,7 +100,6 @@ if (( WARNING_EPOCH > PID_START_EPOCH )); then
   log_message "CRITICAL: Thread pool reached 0% at $WARNING_TIMESTAMP; current PID $IS_PID started at $PID_START_TEXT. Restarting Integration Server"
   timeout 30 jstack "$ID_PID" > "$HOME/tools/IS-thread-dump-$(date '+%Y%n%d-%H%M%S').log" 2>&1 || 
   log_message "ERROR: Failed to capture thread dump for PID $IS_PID"
-  jstack "$IS_PID" > /tmp/wM.threaddump.
   kill -9 "$IS_PID"
   sleep 5
   $HOME/IS/bin/startup.sh 9>&-

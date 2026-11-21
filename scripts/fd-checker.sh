@@ -3,34 +3,39 @@
 # Purpose: Check and correct FD limits for processes matching
 #          a specified process name.
 #
-# Usage: ./check_fd_limits.sh <process_name>
-# Example: ./check_fd_limits.sh java
-#
+# Usage:  ./fd-checker.sh [--apply] <process_name>
+# Report: ./fd-checker.sh java                 # Print current and expected limits
+# Apply:  sudo ./fd-checker.sh --apply java    # Change mismatched live limits
 
 LIMITS_FILE="/etc/security/limits.conf"
 EMAIL="youremail@domain.com"
 HOST=$(hostname -s)
+
+APPLY=0
+if [[ ${1:-} == --apply ]]; then
+    APPLY=1
+    shift
+fi
+
+if [[ $# -ne 1 || -z ${1:-} || ${1:-} == -* ]]; then
+    printf 'Usage: %s [--apply] <process_name>\n' "$0" >&2
+    exit 2
+fi
+
 PROCNAME="$1"
+
+if (( APPLY && EUID != 0 )); then
+    printf 'ERROR: --apply must be run as root.\n' >&2
+    exit 1
+fi
 
 # Counters
 CHECKED=0
 UPDATED=0
 SKIPPED=0
 FAILED=0
-
+MISMATCHED=0
 REPORT=""
-
-# Validate arguments.
-if [[ -z "$PROCNAME" ]]; then
-    echo "Usage: $0 <process_name>"
-    exit 1
-fi
-
-# Require root.
-if [[ $EUID -ne 0 ]]; then
-    echo "ERROR: Script must be run as root."
-    exit 1
-fi
 
 if [[ ! -r "$LIMITS_FILE" ]]; then
     echo "ERROR: Cannot read $LIMITS_FILE"
@@ -38,14 +43,22 @@ if [[ ! -r "$LIMITS_FILE" ]]; then
 fi
 
 # Find processes by exact process name.
-# pgrep -x matches the process comm name, not its full
-# command line. Linux comm names are limited to 15 bytes.
-mapfile -t PIDS < <(pgrep -x -- "$PROCNAME")
+# Escape regex characters for a literal match against the Linux comm name.
+PROCESS_PATTERN=$(printf '%s\n' "$PROCNAME" | sed 's/[][\\.^$*+?(){}|]/\\&/g')
+PID_OUTPUT=$(pgrep -x -- "$PROCESS_PATTERN")
+PGREP_STATUS=$?
 
-if [[ ${#PIDS[@]} -eq 0 ]]; then
+if (( PGREP_STATUS == 1 )); then
     echo "INFO: No processes found matching: $PROCNAME"
     exit 0
 fi
+
+if (( PGREP_STATUS != 0 )); then
+    printf 'ERROR: pgrep failed for %s (exit %s).\n' "$PROCNAME" "$PGREP_STATUS" >&2
+    exit 1
+fi
+
+mapfile -t PIDS <<< "$PID_OUTPUT"
 
 echo "Found ${#PIDS[@]} process(es) matching: $PROCNAME"
 
@@ -132,7 +145,14 @@ for PID in "${PIDS[@]}"; do
     if [[ "$SPIDLIMIT" != "$SLIMIT" ]] ||
        [[ "$HPIDLIMIT" != "$HLIMIT" ]]; then
 
-        # Confirm PID still belongs to the same process.
+        ((MISMATCHED++))
+
+	if (( ! APPLY )); then
+	    printf 'REPORT: PID %s differs from configured limits. No change made.\n' "$PID"
+	    continue
+        fi
+
+        # Recheck the process owner and name before applying
         CURRENT_USER=$(ps -o user= -p "$PID" | xargs)
         CURRENT_NAME=$(cat "/proc/$PID/comm" 2>/dev/null)
 
@@ -176,14 +196,14 @@ echo "FD Limit Check Summary"
 echo "Host: $HOST"
 echo "Process: $PROCNAME"
 echo "Checked: $CHECKED"
+echo "Mismatched: $MISMATCHED"
 echo "Updated: $UPDATED"
 echo "Skipped: $SKIPPED"
 echo "Failed: $FAILED"
 echo "========================================"
 
 # Send one email if updates or failures occurred.
-if (( UPDATED > 0 || FAILED > 0 )); then
-
+if (( APPLY && (UPDATED > 0 || FAILED > 0) )); then
     {
         echo "FD Limit Check Report"
         echo "Host: $HOST"
@@ -191,6 +211,7 @@ if (( UPDATED > 0 || FAILED > 0 )); then
         echo "Process: $PROCNAME"
         echo
         echo "Checked: $CHECKED"
+	echo "Mismatched: $MISMATCHED"
         echo "Updated: $UPDATED"
         echo "Skipped: $SKIPPED"
         echo "Failed: $FAILED"

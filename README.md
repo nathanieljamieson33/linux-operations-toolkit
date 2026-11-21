@@ -26,7 +26,7 @@ The FD checker prints the current and configured limits and counts mismatches. I
 For the SFTP check, provision the verified server host key in known_hosts for the account running the check. Store the password on one line in a file readable only by that account:
 
 ```bash
-./sitescope_sftp_check.exp sftp.example.com 22 monitor /path/to/password-file
+./scripts/sitescope_sftp_check.exp sftp.example.com 22 monitor /path/to/password-file
 ```
 
 The check opens a session without transferring files. Exit codes are 0 for success, 1 for connection or login failure, 2 for timeout, and 3 for invalid input or local setup errors.

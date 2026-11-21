@@ -19,7 +19,7 @@ From the repository root, check file descriptor limits for processes named `java
 ```bash
 ./scripts/fd-checker.sh java
 ./scripts/service-control.sh status nginx
-
+```
 
 The FD checker prints the current and configured limits and counts mismatches. It reads explicit per-user entries from /etc/security/limits.conf. For a systemd-managed service, check the unit’s LimitNOFILE setting before treating a difference as a configuration error. Use sudo ./scripts/fd-checker.sh --apply java only when you intend to change the limits of matching running processes. Apply mode leaves persistent configuration files untouched.
 
@@ -29,8 +29,6 @@ For the SFTP check, provision the verified server host key in known_hosts for th
 
 The check opens a session without transferring files. Exit codes are 0 for success, 1 for connection or login failure, 2 for timeout, and 3 for invalid input or local setup errors.
 
-Environment-specific setup
+## Environment-specific setup
 
 Set the mail recipient before using the IBM MQ monitor, FD checker in apply mode, or Integration Server recovery script. The recovery script assumes an installation under $HOME/IS and uses $HOME/tools for its state, lock, and logs.
-
-The Integration Server recovery example is under validation. Its restart path currently references an undefined PID variable and can exit before restarting the service.

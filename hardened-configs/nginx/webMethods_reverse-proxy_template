@@ -1,0 +1,105 @@
+# For more information on configuration, see:
+#   * Official English Documentation: http://nginx.org/en/docs/
+
+worker_processes auto;
+error_log /<<ENV>>/<<USER>>/nginx/logs/error.log;
+pid /<<ENV>>/<<USER>>/nginx/logs/nginx.pid;
+
+# Load dynamic modules. See /usr/share/doc/nginx/README.dynamic.
+#include /usr/share/nginx/modules/*.conf;
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $content_length $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /<<ENV>>/<<USER>>/nginx/logs/access.log  main;
+    sendfile            on;
+    tcp_nopush          on;
+    tcp_nodelay         on;
+    keepalive_timeout   65;
+    types_hash_max_size 2048;
+    client_max_body_size 100M;
+    include             /<<ENV>>/<<USER>>/nginx/mime.types;
+    default_type        application/octet-stream;
+
+    # Load modular configuration files from the /etc/nginx/conf.d directory.
+    # See http://nginx.org/en/docs/ngx_core_module.html*include
+    # for more information.
+
+    include /etc/nginx/conf.d/*.conf;
+
+    server {
+        listen       <<APP_VIP>>:8080 default_server;
+        server_name  _;
+        root         /<<ENV>>/<<USER>>/nginx/html;
+        client_body_temp_path /<<ENV>>/<<USER>>/nginx/client_body;
+        fastcgi_temp_path /<<ENV>>/<<USER>>/nginx/fastcgi_temp;
+        proxy_temp_path /<<ENV>>/<<USER>>/nginx/proxy_temp;
+        scgi_temp_path /<<ENV>>/<<USER>>/nginx/scgi_temp;
+        uwsgi_temp_path /<<ENV>>/<<USER>>/nginx/uwsgi_temp;
+        # Load configuration files for the default server block.
+        include /<<ENV>>/<<USER>>/nginx/default.d/*.conf;
+        server_tokens off;
+
+	# By default, adding CSP or X-Frame-Options with add_header in a location replaces
+	# entire inherited set of add_header directives. Repeat any server-level headers
+	# you still need in that location, including nosniff and HSTS if Nginx sets it.
+
+	## Tell browsers to honor declared content type.
+	add_header X-Content-Type-Options nosniff always;
+        # Public HTTPS front end forwards this header to clients.
+        add_header Strict-Transport-Security "max-age=31536000" always;
+
+	## Clickjacking Protection - add for browser/UI location blocks
+        ## add_header X-Frame-Options "SAMEORIGIN";
+
+	## ** Deprecated ** - tell older browsers to block page rendering for XSS
+        #add_header X-XSS-Protection "1; mode=block";
+
+	## Only add CSP to locations that serve static HTML
+	#add_header Content-Security-Policy "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" always;
+
+	# Example explicit block path. This prevents admin ui access for webMethods.
+        location ^~ /WmRoot/ {
+          deny all;
+          return 403;
+        }
+
+	# Example of specific API path, only allow GET, HEAD, POST.
+        location = /invoke/Example.orders/orderFile {
+          proxy_pass http://<<LB_ADDRESS>>:<<LB_PORT>>/invoke/Example.orders/orderFile;
+          limit_except GET POST { deny all; }
+          proxy_intercept_errors on;
+	  ## Inlcude if your backend app reveals too detailed of an error message
+          # Returns a generic XML body and HTTP 500 for these errors.
+          error_page 500 502 503 504 = @generic_error;
+	  ## Session hijacking protection
+          # Apply these flags if the upstream issues JSESSIONID to HTTPS clients.
+	  proxy_cookie_flags JSESSIONID httponly secure;
+        }
+
+	# Generic catchcall to return 404 for endpoints not defined
+        location / {
+          return 404;
+        }
+
+        location @generic_error {
+          default_type application/xml;
+          return 500 '<?xml version="1.0"?><Error><Code>0003.4089</Code><Message>Request could not be processed.</Message></Error>';
+        }
+
+	error_page 404 /404.html;
+	location = /404.html {
+	  internal;
+	}
+
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+	  internal;
+        }
+    }
+}
